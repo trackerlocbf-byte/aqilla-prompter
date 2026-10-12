@@ -237,8 +237,54 @@
         ? `Kontrol terdeteksi · perintah terakhir: ${({ ...LABELS,...OPTIONAL_LABELS })[lastAction]}`
         : 'Profil standar: Spasi/Enter = Play, ↑/↓ = gulir naskah, ←/→ = kecepatan. Tekan ? untuk membuka lagi.';
   }
+  // Mobile access with ZERO changes to the existing visible UI:
+  // long-press the TELEPROMPTER label/title in the top bar for 750ms.
+  // This is deliberately limited to the header title, so normal controls,
+  // scrolling, and the script reader keep their original interactions.
+  function installTouchAccess() {
+    const title = document.querySelector('.topbar .crumb');
+    if (!title) return;
+    let holdTimer = null;
+    let startX = 0;
+    let startY = 0;
+    let holdTriggered = false;
+    title.style.userSelect = 'none';
+    title.style.webkitUserSelect = 'none';
+    title.addEventListener('pointerdown', event => {
+      if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
+      if (event.isPrimary === false) return;
+      clearTimeout(holdTimer);
+      holdTriggered = false;
+      startX = event.clientX;
+      startY = event.clientY;
+      holdTimer = setTimeout(() => {
+        holdTimer = null;
+        holdTriggered = true;
+        openPanel();
+      }, 750);
+    });
+    title.addEventListener('pointermove', event => {
+      if (holdTimer && Math.hypot(event.clientX-startX, event.clientY-startY) > 15) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+    });
+    const stopHold = () => {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    };
+    title.addEventListener('pointerup', stopHold);
+    title.addEventListener('pointercancel', stopHold);
+    title.addEventListener('pointerleave', stopHold);
+    title.addEventListener('contextmenu', event => {
+      // Avoid text selection/callout when the user presses the title to open
+      // the remote controls. Never suppress context menus elsewhere.
+      if (holdTriggered || holdTimer) event.preventDefault();
+    });
+  }
   load();
   window.addEventListener('keydown',keydown,true);
+  installTouchAccess();
   // Public status exposed only for lightweight smoke tests. Connection status
   // cannot be determined reliably from web keyboard events.
   window.AqillaRemote = Object.freeze({
