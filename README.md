@@ -1,6 +1,41 @@
-# AQILLA PROMPTER — Voice Follow Teleprompter
+# AQILLA PROMPTER V1.1 — Voice Follow + Remote Desview P8
 
 Web teleprompter statis (tanpa server dan tanpa database) untuk digunakan dari Chrome/Edge.
+
+## Baru di V1.1: Dukungan remote Bluetooth Desview P8
+
+**Tampilan V1.0 sama persis.** Seluruh struktur panel, font, dan stylesheet `style.css` tidak diubah. Penambahan hanya adaptor `remote.js` dan `remote.css` (CSS-nya hanya aktif ketika dialog remote dibuka), plus sedikit fungsi kontrol di `app.js`.
+
+### Cara menghubungkan remote ke Windows
+
+1. Pastikan PC/laptop mempunyai Bluetooth. Jika PC tidak memiliki Bluetooth, diperlukan USB Bluetooth adapter.
+2. Nyalakan remote Desview P8 lalu buka **Windows Settings → Bluetooth & devices → Add device → Bluetooth**.
+3. Pilih remote saat muncul (pada beberapa varian bernama **Desview**) dan selesaikan pairing. Tutup aplikasi lain yang sedang menggunakan remote.
+4. Buka AQILLA PROMPTER di Chrome atau Edge. Fokuskan halaman web dengan mengeklik area teks.
+5. Tekan tombol remote. Jika varian remote mengirim event keyboard standar, respons bisa langsung bekerja menggunakan profil di bawah.
+6. Untuk menyesuaikan tombol remote fisik, tekan **Ctrl + Alt + B** atau **?** saat tidak sedang mengetik naskah. Panel kalibrasi muncul **sementara** di atas tampilan. Klik **Rekam tombol** di salah satu aksi, lalu tekan tombol fisik remote. Ulangi untuk setiap tombol. Setelah itu klik **Selesai**.
+
+### Profil tombol default ketika mode Desview aktif
+
+| Input keyboard dari remote | Aksi |
+|---|---|
+| Spasi, Enter, Media Play/Pause | Putar/jeda scroll manual |
+| Panah atas / Page Up | Mundur sekitar 9 kata |
+| Panah bawah / Page Down | Maju sekitar 9 kata |
+| Panah kiri / Volume Down | Perlambat scroll manual 10 px/detik |
+| Panah kanan / Volume Up | Percepat scroll manual 10 px/detik |
+
+Perintah di atas berlaku pada keyboard biasa juga jika fokus berada di luar kolom ketik. Tombol asli remote bisa memiliki kode berbeda, jadi gunakan panel kalibrasi untuk menyesuaikan. Tersedia juga aksi opsional untuk Voice Follow, Mirror, dan ke awal naskah. **Voice Follow tidak menggunakan pengaturan kecepatan manual**, karena mengikuti hasil pengenalan ucapan.
+
+**Batas kompatibilitas penting:** browser web tidak dapat melakukan pairing Bluetooth HID (remote keyboard) secara langsung menggunakan Web Bluetooth. Pairing dilakukan di Windows, dan situs menerima input keyboard jika remote mengirimkannya ke browser. Sebagian varian remote dapat memakai protokol khusus aplikasi resmi Desview atau mengirim tombol yang diambil alih sistem operasi; dalam kasus ini, pemetaan website saja tidak cukup. Jika dialog 'Rekam tombol' tidak menangkap **satu pun** tombol, jangan menganggap perangkat sudah terhubung ke aplikasi: uji pairing di Windows dan kirim detail model/tombol untuk diagnosa lebih lanjut.
+
+### Update repository GitHub Pages yang sudah ada
+
+1. Unduh dan ekstrak ZIP V1.1.
+2. Masuk ke repository `aqilla-prompter` → **Add file → Upload files**.
+3. Upload semua **7 file** dari akar folder (`index.html`, `style.css`, `app.js`, `remote.js`, `remote.css`, `README.md`, `.nojekyll`). Untuk nama yang sudah ada, GitHub akan mengganti konten file setelah commit.
+4. Commit. Jika GitHub Pages sudah aktif, tidak perlu setup Pages ulang; tunggu deploy, refresh web dengan `Ctrl + F5`.
+5. Naskah tidak perlu diupload ke GitHub. Naskah lokal yang telah tersimpan di browser/perangkat yang sama dipertahankan karena storage key V1.0 tetap digunakan, selama data situs belum dihapus.
 
 ## Fitur
 

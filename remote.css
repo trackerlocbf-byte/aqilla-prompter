@@ -1,0 +1,27 @@
+/* Remote Edition: these rules are scoped to an overlay that is NOT rendered
+   during normal prompter use; the original page appearance is unchanged. */
+.remote-dialog-backdrop[hidden]{display:none!important}
+.remote-dialog-backdrop{position:fixed;z-index:999999;inset:0;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.78);backdrop-filter:blur(6px)}
+.remote-dialog{width:min(650px,100%);max-height:min(90vh,790px);overflow:auto;background:#161920;color:#f4f4f7;border:1px solid #434653;border-radius:18px;box-shadow:0 20px 65px #000b;font-family:Inter,Arial,sans-serif;font-size:13px}
+.remote-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:19px 22px 14px;border-bottom:1px solid #30333e}
+.remote-dialog h2{font-size:19px;line-height:1.3;margin:0 0 4px;font-weight:800;color:#fff}
+.remote-dialog-head p{color:#a2a7b5;margin:0;font-size:12px}
+.remote-dialog button{border:1px solid #5b5e70;background:#262a36;color:white;border-radius:9px;padding:8px 11px;font:inherit;cursor:pointer}
+.remote-dialog button:hover{background:#363a48}
+.remote-dialog button:focus-visible{outline:2px solid #ffb82e;outline-offset:2px}
+.remote-dialog-head #remote-close{font-size:17px;min-width:35px}
+.remote-dialog-content{padding:18px 22px 20px}
+.remote-help{font-size:13px;line-height:1.65;background:#222630;border-radius:10px;padding:11px 13px;color:#e0e2e8;margin:0 0 13px}
+.remote-switch{display:flex;align-items:center;gap:8px;font-weight:700;margin:13px 0}
+.remote-switch input{accent-color:#ffb82e;width:17px;height:17px}
+.remote-action-list{border-top:1px solid #333746}
+.remote-action{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid #333746;padding:11px 0}
+.remote-action strong{display:block;font-size:13px;margin-bottom:4px}
+.remote-action small{display:block;color:#9aa2b7;font-size:11px}
+.remote-action button{min-width:125px;white-space:nowrap}
+.remote-action button.learning{border-color:#f9b526;background:#6b4c12}
+.remote-details{color:#ffd17d;min-height:34px;margin:16px 0 8px;line-height:1.6}
+.remote-footer{display:flex;justify-content:space-between;gap:10px}
+.remote-footer #remote-done{background:#cc287a;border-color:#da3f91;min-width:90px;font-weight:700}
+.remote-caveat{color:#a0a6b4;line-height:1.5;font-size:11px;margin:14px 0 0}
+@media(max-width:500px){.remote-dialog-head{padding:15px}.remote-dialog-content{padding:15px}.remote-action button{min-width:105px}.remote-dialog{max-height:93vh}}

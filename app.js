@@ -770,9 +770,34 @@
     scrollFrame=requestAnimationFrame(animationLoop);
   }
   init();
-  // Expose only a small testable public interface for scripted browser smoke tests.
+  // Public controls used by a separate, optional remote adapter.
+  // Deliberately leave the original keyboard shortcuts and interface untouched.
+  function nudgeWords(delta) {
+    if (!matchTokens.length) return;
+    if (manualPlaying) stopManual(false);
+    committed = clamp(committed + delta, 0, matchTokens.length);
+    projected = committed;
+    updateReadState(true);
+    queueSave();
+  }
+  function adjustRemoteSpeed(delta) {
+    settings.speed = clamp(settings.speed + delta, 12, 170);
+    el.speedRange.value = settings.speed;
+    el.speedRange.dispatchEvent(new Event('input', { bubbles: true }));
+    visibleMessage(`Kecepatan scroll ${settings.speed} px/detik`, 1700);
+  }
   window.AqillaPrompter = Object.freeze({
-    get state() { return {committed,projected,tokenCount:matchTokens.length,voiceWanted,manualPlaying,saveFailed}; },
-    get visibleWords() { return displayWords.length; }
+    get state() { return {committed,projected,tokenCount:matchTokens.length,voiceWanted,manualPlaying,saveFailed,scrollSpeed:settings.speed}; },
+    get visibleWords() { return displayWords.length; },
+    remote: Object.freeze({
+      playPause: toggleManual,
+      previous: () => nudgeWords(-9),
+      next: () => nudgeWords(9),
+      speedUp: () => adjustRemoteSpeed(10),
+      speedDown: () => adjustRemoteSpeed(-10),
+      voice: () => voiceWanted ? stopVoice() : startVoice(),
+      mirror: () => el.mirrorHorizontal.click(),
+      start: resetPosition
+    })
   });
 })();
