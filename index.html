@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#08090d">
+  <meta name="description" content="AQILLA PROMPTER — teleprompter dengan voice-follow Bahasa Indonesia, mirror, dan font besar.">
+  <title>AQILLA PROMPTER — Voice Follow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar" aria-label="Panel skrip dan pengaturan">
+      <div class="brand">
+        <div class="brand-icon" aria-hidden="true">A<span>↗</span></div>
+        <div class="brand-copy"><b>AQILLA <em>PROMPTER</em></b><small>STUDIO EDITION · V1.0</small></div>
+        <button type="button" class="icon-btn mobile-close" id="closeSidebar" aria-label="Tutup panel">✕</button>
+      </div>
+      <div class="sidebar-body">
+        <section class="panel" aria-labelledby="scriptTitle">
+          <div class="section-heading"><h2 id="scriptTitle">Naskah</h2><span class="small-pill" id="saveStatus">Tersimpan lokal</span></div>
+          <div class="script-title-input"><label for="scriptName" class="sr-only">Nama naskah</label><input type="text" maxlength="90" id="scriptName" placeholder="Judul naskah"></div>
+          <textarea spellcheck="false" id="scriptInput" aria-label="Tulis atau tempel naskah" placeholder="Tempel atau tulis skrip di sini..."></textarea>
+          <div class="script-actions">
+            <button type="button" class="secondary-btn" id="importBtn"><span aria-hidden="true">↥</span> Impor PDF / DOCX / TXT</button>
+            <button type="button" class="square-btn" id="pasteBtn" title="Tempel dari clipboard" aria-label="Tempel naskah">▣</button>
+            <button type="button" class="square-btn" id="clearBtn" title="Kosongkan naskah" aria-label="Kosongkan naskah">⌫</button>
+          </div>
+          <input id="fileInput" type="file" accept=".pdf,.docx,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+          <div class="helper"><span id="wordCount">0 kata</span><span id="durationEstimate">±0 menit</span></div>
+        </section>
+        <section class="panel settings-panel" aria-labelledby="styleTitle">
+          <div class="section-heading"><h2 id="styleTitle">Tampilan teks</h2><button class="text-button" id="resetStyle" type="button">Reset</button></div>
+          <div class="control-group"><div class="control-heading"><label for="sizeRange">Ukuran huruf</label><output id="sizeValue">62 px</output></div>
+            <div class="ruler-wrap"><input id="sizeRange" class="ruler" type="range" min="24" max="120" step="2" value="62"><div class="tick-track" aria-hidden="true"></div><div class="range-labels"><span>Kecil</span><span>Besar</span></div></div>
+          </div>
+          <div class="control-group"><div class="control-heading"><label for="lineRange">Jarak baris</label><output id="lineValue">1.35×</output></div><input id="lineRange" type="range" min="1.05" max="2" step="0.05" value="1.35"></div>
+          <div class="control-group"><div class="control-heading"><label for="widthRange">Lebar naskah</label><output id="widthValue">90%</output></div><input id="widthRange" type="range" min="54" max="100" step="2" value="90"></div>
+          <div class="control-group"><div class="control-heading"><label for="cueRange">Posisi garis baca</label><output id="cueValue">42%</output></div><input id="cueRange" type="range" min="18" max="75" step="1" value="42"></div>
+          <div class="control-group"><label for="fontSelect" class="field-label">Jenis font</label><select id="fontSelect"><option value="Nunito">Nunito ExtraBold · mirip contoh</option><option value="Inter">Inter Bold</option><option value="Arial">Arial Bold</option><option value="Trebuchet MS">Trebuchet MS</option><option value="Verdana">Verdana Bold</option></select></div>
+          <div class="toggle-grid"><label class="toggle-control"><input type="checkbox" id="mirrorHorizontal"><span class="toggle-track"></span><span>Mirror ↔</span></label><label class="toggle-control"><input type="checkbox" id="mirrorVertical"><span class="toggle-track"></span><span>Mirror ↕</span></label></div>
+          <div class="toggle-grid"><label class="toggle-control"><input type="checkbox" id="cueVisible" checked><span class="toggle-track"></span><span>Garis baca</span></label><label class="toggle-control"><input type="checkbox" id="smoothScroll" checked><span class="toggle-track"></span><span>Scroll halus</span></label></div>
+        </section>
+        <section class="panel voice-settings" aria-labelledby="voiceSettingsTitle"><div class="section-heading"><h2 id="voiceSettingsTitle">Pengaturan bacaan</h2></div>
+          <div class="control-group"><label class="field-label" for="languageSelect">Bahasa pengenal suara</label><select id="languageSelect"><option value="id-ID">Indonesia (id-ID)</option><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="ms-MY">Melayu (Malaysia)</option></select></div>
+          <div class="control-group"><div class="control-heading"><label for="speedRange">Kecepatan scroll manual</label><output id="speedValue">40 px/detik</output></div><input id="speedRange" type="range" min="12" max="170" step="2" value="40"></div>
+          <p class="voice-note">Voice Follow mencocokkan suara dengan kata naskah. Coba Chrome / Edge, izinkan mikrofon, dan gunakan internet stabil. Audio dapat diproses oleh layanan pengenal suara browser.</p>
+        </section>
+      </div>
+      <div class="sidebar-footer"><div class="lock">◈</div><div><b>Privasi naskah</b><small>Naskah disimpan lokal. Pengenalan audio bergantung pada browser.</small></div></div>
+    </aside>
+    <div class="sidebar-shade" id="sidebarShade" hidden></div>
+    <main class="workspace" id="workspace">
+      <header class="topbar">
+        <div class="topbar-left"><button class="icon-btn" id="toggleSidebar" title="Panel pengaturan" aria-label="Buka/tutup pengaturan">☰</button><div class="crumb"><small>TELEPROMPTER</small><strong id="topScriptName">Naskah Baru</strong></div></div>
+        <div class="topbar-actions"><span class="autosave">● <span id="cloudLabel">Simpan otomatis</span></span><button type="button" class="outline-btn" id="resetPositionBtn">↺ <span>Awal</span></button><button type="button" class="outline-btn" id="fullscreenBtn">⛶ <span>Fullscreen</span></button></div>
+      </header>
+      <section class="studio">
+        <div class="reader-header"><div class="status-left"><span class="live-dot" id="liveDot"></span><span id="modeLabel">SIAP MEMBACA</span><span class="status-divider"></span><span id="progressLabel">0% naskah</span></div><div class="header-tip" id="headerTip">Klik kata untuk memilih posisi mulai</div></div>
+        <div class="prompter-frame" id="prompterFrame">
+          <div class="prompter-viewport" id="viewport" tabindex="0" aria-label="Tampilan teks teleprompter">
+            <div class="mirror-wrapper" id="mirrorWrapper"><div id="scriptDisplay" class="script-display"></div></div>
+          </div>
+          <div class="cue-line" id="cueLine"><span class="cue-tick left"></span><span class="cue-tick right"></span></div>
+          <div class="prompter-top-fade"></div><div class="prompter-bottom-fade"></div>
+          <div class="frame-corner top-left"></div><div class="frame-corner top-right"></div><div class="frame-corner bottom-left"></div><div class="frame-corner bottom-right"></div>
+          <div class="reading-badge" id="readingBadge">BELUM DIMULAI</div>
+        </div>
+        <div class="voice-bar" id="voiceBar"><div class="voice-indicator"><div class="voice-disc">◉</div><div class="voice-bar-copy"><strong id="voiceTitle">Voice Follow</strong><span id="heardText" aria-live="polite">Siap mengikuti suara Anda</span></div></div><span class="voice-tag" id="voiceTag">NONAKTIF</span></div>
+        <div class="transport"><div class="transport-group">
+          <button type="button" class="transport-btn prev" id="backBtn" title="Mundur satu paragraf" aria-label="Paragraf sebelumnya">⏮</button>
+          <button type="button" class="primary-btn" id="voiceBtn"><span id="voiceIcon">◉</span> <span id="voiceBtnLabel">Mulai Voice Follow</span></button>
+          <button type="button" class="transport-btn" id="manualBtn" title="Putar/jeda scroll otomatis manual"><span id="manualIcon">▶</span> <span id="manualLabel">Scroll manual</span></button>
+          <button type="button" class="transport-btn next" id="nextBtn" title="Maju satu paragraf" aria-label="Paragraf berikutnya">⏭</button>
+        </div></div>
+        <div class="shortcuts"><div><kbd>V</kbd> Voice <kbd>Spasi</kbd> Manual <kbd>←</kbd> <kbd>→</kbd> Paragraf <kbd>M</kbd> Mirror</div><div><kbd>F</kbd> Fullscreen <kbd>+</kbd> <kbd>−</kbd> Ukuran huruf</div></div>
+      </section>
+    </main>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </div>
+</body>
+</html>
