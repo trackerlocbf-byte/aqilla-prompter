@@ -42,6 +42,28 @@
   let lastFrameAt = 0;
   let fullscreenFallback = false;
   let saveFailed = false;
+  // V1.3 low-latency voice assist (no interface changes).
+  let paintedCurrent = -1;
+  let paintedReadThrough = -1;
+  let recognitionCursor = 0;
+  let recognizerEverMatched = false;
+  let voiceEstimate = 0;
+  let lastRecognitionProgressAt = 0;
+  let segmentAnchors = new Map();
+  let microphoneStream = null;
+  let audioContext = null;
+  let audioAnalyser = null;
+  let audioSamples = null;
+  let audioLastPollAt = 0;
+  let audioFloor = 0.007;
+  let voiceEnergySince = 0;
+  let voiceEnergyUntil = 0;
+  let audioAssistGeneration = 0;
+  let audioAssistAvailable = false;
+  let micMoveSaveAt = 0;
+  let speechWasActive = false;
+  let exclusiveMicFallbackTried = false;
+  let lastForcedVoiceRestartAt = 0;
 
   function clamp(n, low, high) { return Math.min(high, Math.max(low, n)); }
   function visibleMessage(msg, ms = 3600) {
@@ -203,6 +225,8 @@
       fragment.append(welcome);
     }
     el.scriptDisplay.replaceChildren(fragment);
+    paintedCurrent = -1;
+    paintedReadThrough = -1;
     committed = clamp(committed, 0, matchTokens.length);
     projected = committed;
     updateReaderPadding();
@@ -216,15 +240,20 @@
   function targetForToken(tokenIndex) {
     const word = positionToWord(tokenIndex);
     if (!word) return 0;
-    // OffsetTop is measured before horizontal mirroring, so X-mirror doesn't disturb cue alignment.
+    // Measurements are limited to the active word, not every word in a long script.
     const span = word.element;
     const viewportRect = el.viewport.getBoundingClientRect();
     const textRect = span.getBoundingClientRect();
     const delta = settings.mirrorY
       ? (viewportRect.top + viewportRect.height * (1-settings.cue/100) - textRect.bottom)
       : (textRect.top - (viewportRect.top + viewportRect.height * settings.cue/100));
-    return clamp(el.viewport.scrollTop + (settings.mirrorY ? -delta : delta), 0,
-      Math.max(0, el.viewport.scrollHeight - el.viewport.clientHeight));
+    // Move *within* a text line as well as at line breaks. Previously nothing
+    // visibly scrolled until the reader reached the next wrapped line.
+    // offsetLeft is independent of horizontal mirror transforms.
+    const leftProgress = clamp(span.offsetLeft / Math.max(1,el.scriptDisplay.clientWidth), 0, 1);
+    const glidingPixels = leftProgress * settings.size * settings.line * .6;
+    return clamp(el.viewport.scrollTop + (settings.mirrorY ? -delta - glidingPixels : delta + glidingPixels),
+      0, Math.max(0, el.viewport.scrollHeight - el.viewport.clientHeight));
   }
   function moveToToken(token, immediate = false) {
     targetScroll = targetForToken(token);
@@ -235,17 +264,34 @@
     }
   }
   function updateReadState(immediate = false) {
-    const shown = clamp(projected, 0, matchTokens.length);
+    const shown = clamp(Math.floor(projected), 0, matchTokens.length);
     const current = positionToWord(shown);
-    let foundCurrent = false;
-    displayWords.forEach((word) => {
-      const wasRead = word.lastToken <= shown && word.lastToken > word.firstToken;
-      const isCurrent = !foundCurrent && word === current && shown < matchTokens.length;
-      if (isCurrent) foundCurrent = true;
-      word.element.className = 'word ' + (isCurrent ? 'current' : wasRead ? 'read' : 'future');
-      if (isCurrent) word.element.setAttribute('aria-current','true');
-      else word.element.removeAttribute('aria-current');
-    });
+    const currentIndex = shown < matchTokens.length && current ? matchTokens[shown].wordIndex : -1;
+    let readThrough = paintedReadThrough;
+    // Advance or rewind the highlight incrementally instead of rewriting the
+    // className & ARIA on *every word* for every mic/recognition update.
+    while (readThrough + 1 < displayWords.length &&
+      displayWords[readThrough + 1].lastToken <= shown) {
+      readThrough++;
+    }
+    while (readThrough >= 0 && displayWords[readThrough].lastToken > shown) readThrough--;
+    if (paintedCurrent >= 0 && paintedCurrent !== currentIndex && displayWords[paintedCurrent]) {
+      const previous = displayWords[paintedCurrent].element;
+      previous.className = 'word ' + (paintedCurrent <= readThrough ? 'read' : 'future');
+      previous.removeAttribute('aria-current');
+    }
+    if (readThrough > paintedReadThrough) {
+      for (let i=paintedReadThrough+1;i<=readThrough;i++) displayWords[i].element.className='word read';
+    } else if (readThrough < paintedReadThrough) {
+      for (let i=readThrough+1;i<=paintedReadThrough;i++) displayWords[i].element.className='word future';
+    }
+    if (currentIndex >= 0) {
+      const node=displayWords[currentIndex].element;
+      node.className='word current';
+      node.setAttribute('aria-current','true');
+    }
+    paintedReadThrough = readThrough;
+    paintedCurrent = currentIndex;
     const percent = matchTokens.length ? Math.round(committed / matchTokens.length * 100) : 0;
     el.progressLabel.textContent = percent + '% naskah';
     if (!manualPlaying) moveToToken(shown, immediate);
@@ -283,7 +329,23 @@
     updateReadState(true);
     queueSave();
   }
-  function equalTokens(a, b) { return a === b; }
+  function equalTokens(a, b) {
+    if (a === b) return true;
+    if (a.length < 5 || b.length < 5 || Math.abs(a.length-b.length) > 1) return false;
+    // A single recognition typo in a distinctive word should not freeze the script.
+    if (a.length === b.length) {
+      let errors = 0;
+      for (let i=0;i<a.length;i++) if (a[i] !== b[i] && ++errors > 1) return false;
+      return true;
+    }
+    const short = a.length < b.length ? a : b;
+    const long = a.length < b.length ? b : a;
+    let i=0,j=0,errors=0;
+    while (i<short.length && j<long.length) {
+      if (short[i] === long[j]) {i++;j++;} else { if (++errors > 1) return false; j++; }
+    }
+    return true;
+  }
   /**
    * A forward-only, gap-tolerant matcher. Every anchor is scored in a small window around
    * the current location. Requires stronger evidence for larger jumps to prevent frequent
@@ -292,8 +354,8 @@
   function alignSpoken(base, transcript) {
     const spoken = tokensFromText(transcript);
     if (!spoken.length || !matchTokens.length) return base;
-    const lower = Math.max(0, base-7);
-    const upper = Math.min(matchTokens.length-1, base+45);
+    const lower = Math.max(0, base-9);
+    const upper = Math.min(matchTokens.length-1, base+105);
     let bestScore = -Infinity;
     let bestEnd = base;
     let bestHits = 0;
@@ -310,7 +372,7 @@
         let previous = start;
         for (let k=offset+1;k<spoken.length;k++) {
           let found = -1;
-          const maxCheck = Math.min(matchTokens.length-1, end+5, upper+2);
+          const maxCheck = Math.min(matchTokens.length-1, end+7, upper+2);
           for (let j=end+1;j<=maxCheck;j++) {
             if (equalTokens(matchTokens[j].normalized,spoken[k])) { found=j; break; }
           }
@@ -328,6 +390,7 @@
         if (forward > 8 && hits < 3) continue;
         if (forward > 18 && (hits < 4 || adjacent < 1)) continue;
         if (forward > 32 && hits < 6) continue;
+        if (forward > 55 && (hits < 8 || adjacent < 2)) continue;
         const wordLengthBonus = Math.min(1.7, spoken.filter(s => s.length > 5).length*.19);
         const score = hits*2.7 + adjacent*1.8 + wordLengthBonus
           - ignoredSpeech*.62 - missedScript*.52
@@ -367,6 +430,119 @@
     };
     return messages[errorCode] || `Pengenalan suara mengalami gangguan (${errorCode}).`;
   }
+  async function startAudioAssist() {
+    // The analyser works locally: no extra servers, no recording or upload.
+    // If the browser denies a second mic capture, regular recognition still works.
+    const generation=++audioAssistGeneration;
+    audioAssistAvailable=false;
+    if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext && !window.webkitAudioContext) return;
+    try {
+      const stream=await navigator.mediaDevices.getUserMedia({audio:{
+        echoCancellation:true, noiseSuppression:true, autoGainControl:true
+      }});
+      if (!voiceWanted || generation !== audioAssistGeneration) {
+        stream.getTracks().forEach(t=>t.stop()); return;
+      }
+      const AudioCtx=window.AudioContext || window.webkitAudioContext;
+      const ctx=new AudioCtx({latencyHint:'interactive'});
+      const source=ctx.createMediaStreamSource(stream);
+      const analyser=ctx.createAnalyser();
+      analyser.fftSize=1024;
+      analyser.smoothingTimeConstant=.15;
+      source.connect(analyser);
+      if (ctx.state === 'suspended') await ctx.resume();
+      if (!voiceWanted || generation !== audioAssistGeneration) {
+        stream.getTracks().forEach(t=>t.stop()); await ctx.close(); return;
+      }
+      microphoneStream=stream;
+      audioContext=ctx;
+      audioAnalyser=analyser;
+      audioSamples=new Uint8Array(analyser.fftSize);
+      audioFloor=.007;
+      audioLastPollAt=0;
+      audioAssistAvailable=true;
+    } catch (_) {
+      audioAssistAvailable=false;
+    }
+  }
+  function stopAudioAssist() {
+    ++audioAssistGeneration;
+    if (microphoneStream) microphoneStream.getTracks().forEach(t=>t.stop());
+    microphoneStream=null;
+    if (audioContext) {try { audioContext.close(); } catch (_) {}}
+    audioContext=null;
+    audioAnalyser=null;
+    audioSamples=null;
+    audioAssistAvailable=false;
+    speechWasActive=false;
+    voiceEnergySince=0;
+    voiceEnergyUntil=0;
+  }
+  function pollAudioAssist(now) {
+    if (!voiceWanted || !audioAssistAvailable || !audioAnalyser || document.hidden) return;
+    if (now - audioLastPollAt < 55) return;
+    const dt = audioLastPollAt ? Math.min(.12,(now-audioLastPollAt)/1000) : 0;
+    audioLastPollAt=now;
+    audioAnalyser.getByteTimeDomainData(audioSamples);
+    let energy=0;
+    for (let i=0;i<audioSamples.length;i++) {
+      const v=(audioSamples[i]-128)/128;
+      energy += v*v;
+    }
+    const rms=Math.sqrt(energy/audioSamples.length);
+    const above = rms > Math.max(.013, audioFloor*2.6);
+    if (!above) audioFloor=clamp(audioFloor*.985+rms*.015,.003,.03);
+    if (above) {
+      if (!voiceEnergySince) voiceEnergySince=now;
+      voiceEnergyUntil=now+200;
+    } else if (now>voiceEnergyUntil) voiceEnergySince=0;
+    const speaking=Boolean(voiceEnergySince && now-voiceEnergySince > 110 && now<voiceEnergyUntil);
+    speechWasActive=speaking;
+    if (!speaking) return;
+    // If the browser silently stops transcribing speech, rotate the recognizer.
+    // Do this rarely: repeated restarts themselves cause lost words.
+    if (recognition && !recognitionStarting &&
+        now-lastRecognitionProgressAt>7500 && now-lastForcedVoiceRestartAt>8500) {
+      lastForcedVoiceRestartAt=now;
+      status('warning','MEMULIHKAN PENGENAL SUARA','MENCOBA LAGI',
+        'Mikrofon mendengar suara, tetapi pengenal kata tertunda. Menyambungkan ulang…');
+      try { recognition.abort(); } catch (_) {}
+    }
+    // Fast, bounded motion whenever speech has *audible* energy. The browser's
+    // transcript takes over and corrects the exact script location when ready.
+    const gap = now - lastRecognitionProgressAt;
+    const maxAhead = recognizerEverMatched ? (gap > 1600 ? 13 : 7) : 3;
+    const cap=recognitionCursor + maxAhead;
+    voiceEstimate = Math.min(cap,Math.max(voiceEstimate, recognitionCursor) + 2.55*dt);
+    const tentative=Math.min(matchTokens.length,Math.floor(voiceEstimate));
+    if (tentative > projected) {
+      projected=tentative;
+      updateReadState();
+      if (gap > 1600 && now-micMoveSaveAt>3500) {
+        el.heardText.textContent='Suara terdeteksi · menunggu hasil pengenal kata…';
+        micMoveSaveAt=now;
+      }
+    }
+  }
+  function acceptVoiceTranscript(base, transcript) {
+    let candidate=alignSpoken(base, transcript);
+    if (candidate <= recognitionCursor) {
+      // Long interim phrases or backend edits sometimes repeat earlier words.
+      const fragments=tokensFromText(transcript);
+      if (fragments.length>=5) {
+        const tail=fragments.slice(-Math.min(16,fragments.length));
+        candidate=Math.max(candidate,alignSpoken(Math.max(0,recognitionCursor-3),tail.join(' ')));
+      }
+    }
+    if (candidate > recognitionCursor) {
+      recognitionCursor=candidate;
+      recognizerEverMatched=true;
+      lastRecognitionProgressAt=performance.now();
+      voiceEstimate=Math.max(voiceEstimate,candidate);
+      committed=Math.max(committed,candidate);
+    }
+    return candidate;
+  }
   function startVoice() {
     if (!settings.script.trim()) { visibleMessage('Masukkan skrip terlebih dahulu.'); return; }
     if (!isSupported()) {
@@ -377,6 +553,14 @@
     stopManual();
     if (committed >= matchTokens.length) { committed=0; projected=0; updateReadState(true); }
     voiceWanted = true;
+    recognitionCursor = committed;
+    voiceEstimate = committed;
+    recognizerEverMatched = false;
+    lastRecognitionProgressAt=performance.now();
+    speechWasActive=false;
+    exclusiveMicFallbackTried=false;
+    lastForcedVoiceRestartAt=0;
+    startAudioAssist();
     el.voiceBtn.classList.add('running');
     el.voiceBtnLabel.textContent = 'Hentikan Voice Follow';
     el.voiceIcon.textContent = '■';
@@ -394,6 +578,7 @@
     const rec = new Recognition();
     recognition = rec;
     processedFinals = new Set();
+    segmentAnchors = new Map();
     rec.lang = settings.lang;
     rec.continuous = true;
     rec.interimResults = true;
@@ -412,22 +597,27 @@
       if (recognition !== rec || !voiceWanted) return;
       let interim = '';
       let newestFinal = '';
-      // Walk the results (not only resultIndex) because browsers sometimes update earlier interim slots.
+      // Align each recognizer segment to the position where its first interim
+      // was heard. Interim phrases can grow and be revised several times.
       for (let i=0;i<event.results.length;i++) {
         const result = event.results[i];
-        const text = result[0]?.transcript?.trim() || '';
-        if (!text) continue;
+        const words = result[0]?.transcript?.trim() || '';
+        if (!words) continue;
+        if (!segmentAnchors.has(i)) segmentAnchors.set(i, recognitionCursor);
+        const anchor=segmentAnchors.get(i);
         if (result.isFinal) {
           if (!processedFinals.has(i)) {
             processedFinals.add(i);
-            committed = alignSpoken(committed,text);
-            newestFinal = text;
+            acceptVoiceTranscript(anchor,words);
+            newestFinal=words;
           }
         } else {
-          interim += (interim ? ' ' : '') + text;
+          // Process interim immediately; don't wait for a final phrase boundary.
+          acceptVoiceTranscript(anchor,words);
+          interim += (interim ? ' ' : '') + words;
         }
       }
-      projected = interim ? alignSpoken(committed,interim) : committed;
+      projected=Math.max(projected,committed);
       el.heardText.textContent = interim ? `Terdengar: “${interim.slice(-125)}”`
         : newestFinal ? `Terbaca: “${newestFinal.slice(-125)}”` : 'Menunggu kalimat berikutnya…';
       updateReadState();
@@ -436,12 +626,21 @@
     rec.onerror = (event) => {
       if (recognition !== rec || !voiceWanted) return;
       const code = event.error || 'unknown';
-      if (['not-allowed','service-not-allowed','audio-capture','language-not-supported'].includes(code)) {
+      if (code === 'audio-capture' && audioAssistAvailable && !exclusiveMicFallbackTried) {
+        // Some phones cannot share mic capture between Web Audio and Web Speech.
+        // Release the optional analyser; onend will restart recognizer alone.
+        exclusiveMicFallbackTried=true;
+        stopAudioAssist();
+        voiceBackoff=400;
+        status('warning','MENCOBA MIKROFON UTAMA','MENCOBA LAGI',
+          'Melepas detektor suara tambahan agar pengenal kata dapat memakai mikrofon.');
+        try {rec.abort();}catch (_){}
+      } else if (['not-allowed','service-not-allowed','audio-capture','language-not-supported'].includes(code)) {
         visibleMessage(speechErrorMessage(code),6000);
         stopVoice(false);
         status('warning','MICROFON TIDAK TERSEDIA','PERLU TINDAKAN',speechErrorMessage(code));
       } else if (code === 'network') {
-        voiceBackoff = Math.min(Math.max(voiceBackoff*2,1200),6500);
+        voiceBackoff = Math.min(Math.max(voiceBackoff*2,650),3200);
         status('warning','GANGGUAN KONEKSI','MENCOBA LAGI',speechErrorMessage(code));
       } else if (code === 'no-speech') {
         status('warning','MENUNGGU UCAPAN','MENCOBA LAGI',speechErrorMessage(code));
@@ -451,13 +650,13 @@
       if (recognition !== rec) return;
       recognitionStarting = false;
       recognition = null;
-      projected = committed;
+      projected = Math.max(projected,committed);
       updateReadState();
       if (voiceWanted) {
         status('warning','MENYAMBUNGKAN ULANG','MENCOBA LAGI', 'Koneksi suara terputus sesaat, menyambungkan ulang otomatis…');
         clearVoiceTimer();
-        voiceRetryTimer = setTimeout(launchRecognition,voiceBackoff);
-        voiceBackoff = Math.min(Math.round(voiceBackoff*1.5),6500);
+        voiceRetryTimer = setTimeout(launchRecognition,Math.min(voiceBackoff,1600));
+        voiceBackoff = Math.min(Math.round(voiceBackoff*1.3),3200);
       }
     };
     try { rec.start(); }
@@ -470,6 +669,7 @@
   }
   function stopVoice(showMessage = true) {
     voiceWanted = false;
+    stopAudioAssist();
     clearVoiceTimer();
     recognitionStarting = false;
     const prev = recognition;
@@ -534,6 +734,7 @@
     return displayWords[found].firstToken;
   }
   function animationLoop(now) {
+    pollAudioAssist(now);
     const seconds = Math.min(0.06, Math.max(0,(now-lastFrameAt)/1000 || 0));
     lastFrameAt = now;
     if (manualPlaying) {
@@ -787,7 +988,7 @@
     visibleMessage(`Kecepatan scroll ${settings.speed} px/detik`, 1700);
   }
   window.AqillaPrompter = Object.freeze({
-    get state() { return {committed,projected,tokenCount:matchTokens.length,voiceWanted,manualPlaying,saveFailed,scrollSpeed:settings.speed}; },
+    get state() { return {committed,projected,recognitionCursor,audioAssistAvailable,speechWasActive,tokenCount:matchTokens.length,voiceWanted,manualPlaying,saveFailed,scrollSpeed:settings.speed}; },
     get visibleWords() { return displayWords.length; },
     remote: Object.freeze({
       playPause: toggleManual,
